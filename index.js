@@ -104,27 +104,42 @@ setInterval(() => {
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Aumentado para soportar imágenes Base64
 
 // ==================== ENDPOINTS ACADEMIA DEPORTIVA ====================
 
-// Endpoint para obtener horarios disponibles (CON CACHÉ)
+// Endpoint para obtener horarios disponibles (CON CACHÉ y filtrado por edad)
 app.get('/api/horarios', async (req, res) => {
   try {
-    const cacheKey = 'horarios';
+    const añoNacimiento = req.query.año_nacimiento || req.query.ano_nacimiento;
+    
+    // Clave de caché diferente si hay filtro de edad
+    const cacheKey = añoNacimiento ? `horarios_${añoNacimiento}` : 'horarios_todos';
     
     // Intentar obtener del caché
     const cachedData = getFromCache(cacheKey);
     if (cachedData) {
-      console.log('✅ Horarios servidos desde caché');
+      console.log(`✅ Horarios servidos desde caché (${añoNacimiento ? 'filtrados por año ' + añoNacimiento : 'todos'})`);
       return res.json(cachedData);
     }
     
     // Si no está en caché, obtener de Apps Script
-    const url = `${APPS_SCRIPT_URL}?action=horarios&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
+    let url = `${APPS_SCRIPT_URL}?action=horarios&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
+    
+    // Agregar parámetro de año si existe
+    if (añoNacimiento) {
+      url += `&año_nacimiento=${encodeURIComponent(añoNacimiento)}`;
+      console.log(`🎯 Solicitando horarios filtrados para año ${añoNacimiento}`);
+    }
+    
+    console.log('📡 URL COMPLETA que se enviará a Apps Script:');
+    console.log(url);
+    console.log('🔑 Token usado:', APPS_SCRIPT_TOKEN);
     
     const response = await fetch(url);
     const data = await response.json();
+    
+    console.log('📥 RESPUESTA de Apps Script:', JSON.stringify(data, null, 2));
     
     if (!response.ok) {
       throw new Error(data.error || 'Error al obtener horarios');
@@ -132,7 +147,7 @@ app.get('/api/horarios', async (req, res) => {
     
     // Guardar en caché
     setCache(cacheKey, data, CACHE_TTL.horarios);
-    console.log('💾 Horarios guardados en caché');
+    console.log(`💾 Horarios guardados en caché (${añoNacimiento ? data.horarios?.length + ' filtrados' : 'todos'})`);
     
     res.json(data);
   } catch (error) {
@@ -148,6 +163,11 @@ app.get('/api/horarios', async (req, res) => {
 app.post('/api/inscribir-multiple', async (req, res) => {
   try {
     const { alumno, horarios } = req.body;
+    
+    console.log('📝 ==================== INSCRIPCIÓN MÚLTIPLE ====================');
+    console.log('👤 ALUMNO:', JSON.stringify(alumno, null, 2));
+    console.log('📅 HORARIOS (cantidad):', horarios.length);
+    console.log('📋 HORARIOS COMPLETOS:', JSON.stringify(horarios, null, 2));
     
     // Validaciones básicas
     if (!alumno || !horarios || !Array.isArray(horarios)) {
@@ -166,21 +186,26 @@ app.post('/api/inscribir-multiple', async (req, res) => {
     
     // Sin límite global - permitimos múltiples horarios (2 por día validado en frontend)
     
+    const payload = {
+      token: APPS_SCRIPT_TOKEN,
+      action: 'inscribir_multiple',
+      alumno,
+      horarios
+    };
+    
+    console.log('📤 ENVIANDO A APPS SCRIPT:', JSON.stringify(payload, null, 2));
+    
     // Reenviar al Apps Script
     const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        token: APPS_SCRIPT_TOKEN,
-        action: 'inscribir_multiple',
-        alumno,
-        horarios
-      })
+      body: JSON.stringify(payload)
     });
     
     const data = await response.json();
+    console.log('📥 RESPUESTA DE APPS SCRIPT:', JSON.stringify(data, null, 2));
     
     if (!response.ok || !data.success) {
       return res.status(response.status || 500).json(data);
@@ -415,6 +440,68 @@ app.get('/api/consultar/:dni', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Error al consultar inscripción' 
+    });
+  }
+});
+
+// Endpoint: Subir comprobante de pago
+app.post('/api/subir-comprobante', async (req, res) => {
+  try {
+    const { codigo_operacion, dni, alumno, imagen, nombre_archivo } = req.body;
+    
+    // Validaciones básicas
+    if (!codigo_operacion || !dni || !imagen || !nombre_archivo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Datos incompletos. Se requiere: codigo_operacion, dni, imagen y nombre_archivo'
+      });
+    }
+    
+    // Validar formato Base64
+    if (!imagen.startsWith('data:image/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Formato de imagen inválido. Debe ser Base64 con prefijo data:image/'
+      });
+    }
+    
+    console.log(`📸 Subiendo comprobante para DNI ${dni}, código: ${codigo_operacion}`);
+    
+    // Reenviar al Apps Script
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token: APPS_SCRIPT_TOKEN,
+        action: 'subir_comprobante',
+        codigo_operacion,
+        dni,
+        alumno,
+        imagen,
+        nombre_archivo
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok || !data.success) {
+      console.error('❌ Error del Apps Script:', data.error);
+      return res.status(response.status || 500).json(data);
+    }
+    
+    console.log('✅ Comprobante subido exitosamente:', data.url_comprobante);
+    
+    // Invalidar caché de consulta para este DNI
+    clearCache(`consulta_${dni}`);
+    
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Error al subir comprobante:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Error al subir comprobante' 
     });
   }
 });
