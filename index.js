@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
+import NodeCache from 'node-cache';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,77 +31,53 @@ if (!APPS_SCRIPT_URL || !APPS_SCRIPT_TOKEN) {
 
 console.log('✅ Apps Script URL configurado:', APPS_SCRIPT_URL);
 
-// ==================== SISTEMA DE CACHÉ ====================
+// ==================== SISTEMA DE CACHÉ MEJORADO ====================
 
-// Almacenamiento de caché en memoria
-const cache = new Map();
+// Crear instancia de caché con node-cache (más robusto que Map)
+const cache = new NodeCache({
+    stdTTL: 300,      // TTL por defecto: 5 minutos
+    checkperiod: 60,  // Revisar expiración cada 60 segundos
+    useClones: false  // No clonar objetos (mejor performance)
+});
 
-// Configuración de tiempo de vida del caché (en milisegundos)
+// TTLs específicos por tipo de dato (en segundos)
 const CACHE_TTL = {
-  horarios: 5 * 60 * 1000,      // 5 minutos para horarios
-  inscritos: 2 * 60 * 1000,     // 2 minutos para lista de inscritos
-  consulta: 3 * 60 * 1000,      // 3 minutos para consultas de inscripción
-  default: 1 * 60 * 1000        // 1 minuto por defecto
+    horarios: 300,        // 5 minutos
+    inscripciones: 120,   // 2 minutos
+    consultas: 60,        // 1 minuto
+    inscritos: 120,       // 2 minutos para lista de inscritos
+    default: 300          // 5 minutos por defecto
 };
 
 /**
- * Obtiene datos del caché si están disponibles y no han expirado
+ * Genera clave de caché única
  */
-function getFromCache(key) {
-  const cached = cache.get(key);
-  
-  if (!cached) {
-    return null;
-  }
-  
-  // Verificar si el caché expiró
-  if (Date.now() > cached.expiresAt) {
-    cache.delete(key);
-    return null;
-  }
-  
-  return cached.data;
+function getCacheKey(tipo, id = '') {
+    return id ? `${tipo}_${id}` : tipo;
 }
 
 /**
- * Guarda datos en el caché con tiempo de expiración
+ * Invalida caché de un DNI específico (inscripciones + consultas)
  */
-function setCache(key, data, ttl = CACHE_TTL.default) {
-  cache.set(key, {
-    data: data,
-    expiresAt: Date.now() + ttl
-  });
+function invalidateDNICache(dni) {
+    cache.del(getCacheKey('inscripciones', dni));
+    cache.del(getCacheKey('consultas', dni));
+    console.log(`🗑️ CACHÉ INVALIDADO para DNI ${dni}`);
 }
 
 /**
- * Limpia el caché completo o por patrón
+ * Obtiene estadísticas del caché
  */
-function clearCache(pattern = null) {
-  if (!pattern) {
-    cache.clear();
-    console.log('🗑️  Caché completo limpiado');
-    return;
-  }
-  
-  // Limpiar entradas que coincidan con el patrón
-  for (const key of cache.keys()) {
-    if (key.includes(pattern)) {
-      cache.delete(key);
-    }
-  }
-  console.log(`🗑️  Caché limpiado para patrón: ${pattern}`);
+function getCacheStats() {
+    const stats = cache.getStats();
+    return {
+        hits: stats.hits,
+        misses: stats.misses,
+        keys: stats.keys,
+        hitRate: stats.hits > 0 ? ((stats.hits / (stats.hits + stats.misses)) * 100).toFixed(2) + '%' : '0%',
+        activeKeys: cache.keys()
+    };
 }
-
-// Limpiar caché automáticamente cada 10 minutos
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of cache.entries()) {
-    if (now > value.expiresAt) {
-      cache.delete(key);
-    }
-  }
-  console.log('🧹 Limpieza automática de caché ejecutada');
-}, 10 * 60 * 1000);
 
 // Middleware
 app.use(cors());
@@ -114,14 +91,16 @@ app.get('/api/horarios', async (req, res) => {
     const añoNacimiento = req.query.año_nacimiento || req.query.ano_nacimiento;
     
     // Clave de caché diferente si hay filtro de edad
-    const cacheKey = añoNacimiento ? `horarios_${añoNacimiento}` : 'horarios_todos';
+    const cacheKey = getCacheKey('horarios', añoNacimiento || 'all');
     
     // Intentar obtener del caché
-    const cachedData = getFromCache(cacheKey);
+    const cachedData = cache.get(cacheKey);
     if (cachedData) {
-      console.log(`✅ Horarios servidos desde caché (${añoNacimiento ? 'filtrados por año ' + añoNacimiento : 'todos'})`);
+      console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
       return res.json(cachedData);
     }
+    
+    console.log(`🌐 CACHÉ MISS: ${cacheKey} - Consultando Google Sheets`);
     
     // Si no está en caché, obtener de Apps Script
     let url = `${APPS_SCRIPT_URL}?action=horarios&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
@@ -145,9 +124,9 @@ app.get('/api/horarios', async (req, res) => {
       throw new Error(data.error || 'Error al obtener horarios');
     }
     
-    // Guardar en caché
-    setCache(cacheKey, data, CACHE_TTL.horarios);
-    console.log(`💾 Horarios guardados en caché (${añoNacimiento ? data.horarios?.length + ' filtrados' : 'todos'})`);
+    // Guardar en caché (node-cache usa segundos)
+    cache.set(cacheKey, data, CACHE_TTL.horarios);
+    console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.horarios}s, total: ${data.horarios?.length || 0} horarios)`);
     
     res.json(data);
   } catch (error) {
@@ -212,8 +191,14 @@ app.post('/api/inscribir-multiple', async (req, res) => {
     }
     
     // INVALIDAR CACHÉ después de inscripción exitosa
-    clearCache('horarios');
-    clearCache('inscritos');
+    const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(horariosKeys);
+    cache.del(inscritosKeys);
+    if (alumno.dni) {
+      invalidateDNICache(alumno.dni);
+    }
+    console.log('🗑️ CACHÉ INVALIDADO tras inscripción');
     
     res.json(data);
   } catch (error) {
@@ -1467,6 +1452,27 @@ app.get('/', (req, res) => {
     message: 'Backend de Campamento Cristiano funcionando',
     status: 'OK',
     spreadsheetId: SPREADSHEET_ID
+  });
+});
+
+// ==================== ENDPOINTS ADMINISTRATIVOS CACHÉ ====================
+
+// Ver estadísticas del caché
+app.get('/api/cache/stats', (req, res) => {
+  const stats = getCacheStats();
+  res.json({
+    success: true,
+    cache: stats
+  });
+});
+
+// Limpiar todo el caché
+app.post('/api/cache/clear', (req, res) => {
+  cache.flushAll();
+  console.log('🗑️ TODO EL CACHÉ HA SIDO LIMPIADO');
+  res.json({
+    success: true,
+    message: 'Caché limpiado correctamente'
   });
 });
 
