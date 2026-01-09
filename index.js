@@ -369,8 +369,11 @@ app.delete('/api/eliminar-usuario/:dni', async (req, res) => {
     }
     
     // INVALIDAR CACHÉ después de eliminación exitosa
-    clearCache('inscritos');
-    clearCache('horarios');
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    const horariosKeys = cache.keys().filter(k => k.startsWith('horarios_'));
+    cache.del(inscritosKeys);
+    cache.del(horariosKeys);
+    console.log('🗑️ CACHÉ INVALIDADO tras eliminar usuario');
     
     res.json(data);
   } catch (error) {
@@ -395,14 +398,16 @@ app.get('/api/consultar/:dni', async (req, res) => {
     }
     
     // Crear clave de caché para este DNI
-    const cacheKey = `consulta_${dni}`;
+    const cacheKey = getCacheKey('consultas', dni);
     
     // Intentar obtener del caché
-    const cachedData = getFromCache(cacheKey);
+    const cachedData = cache.get(cacheKey);
     if (cachedData) {
-      console.log('✅ Consulta servida desde caché para DNI:', dni);
+      console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
       return res.json(cachedData);
     }
+    
+    console.log(`🌐 CACHÉ MISS: ${cacheKey}`);
     
     const url = `${APPS_SCRIPT_URL}?action=consultar_inscripcion&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}&dni=${encodeURIComponent(dni)}`;
     
@@ -415,8 +420,8 @@ app.get('/api/consultar/:dni', async (req, res) => {
     
     // Solo cachear si la consulta fue exitosa
     if (data.success) {
-      setCache(cacheKey, data, CACHE_TTL.consulta);
-      console.log('💾 Consulta guardada en caché para DNI:', dni);
+      cache.set(cacheKey, data, CACHE_TTL.consultas);
+      console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.consultas}s)`);
     }
     
     res.json(data);
@@ -479,7 +484,7 @@ app.post('/api/subir-comprobante', async (req, res) => {
     console.log('✅ Comprobante subido exitosamente:', data.url_comprobante);
     
     // Invalidar caché de consulta para este DNI
-    clearCache(`consulta_${dni}`);
+    invalidateDNICache(dni);
     
     res.json(data);
   } catch (error) {
@@ -535,11 +540,13 @@ app.get('/api/admin/inscritos', async (req, res) => {
     const cacheKey = `inscritos_${dia || 'all'}_${deporte || 'all'}`;
     
     // Intentar obtener del caché
-    const cachedData = getFromCache(cacheKey);
+    const cachedData = cache.get(cacheKey);
     if (cachedData) {
-      console.log('✅ Inscritos servidos desde caché:', cacheKey);
+      console.log(`⚡ CACHÉ HIT: ${cacheKey}`);
       return res.json(cachedData);
     }
+    
+    console.log(`🌐 CACHÉ MISS: ${cacheKey}`);
     
     let url = `${APPS_SCRIPT_URL}?action=listar_inscritos&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
     
@@ -559,8 +566,8 @@ app.get('/api/admin/inscritos', async (req, res) => {
     }
 
     // Guardar en caché
-    setCache(cacheKey, data, CACHE_TTL.inscritos);
-    console.log('💾 Inscritos guardados en caché:', cacheKey);
+    cache.set(cacheKey, data, CACHE_TTL.inscritos);
+    console.log(`💾 CACHÉ GUARDADO: ${cacheKey} (TTL: ${CACHE_TTL.inscritos}s)`);
 
     res.json(data);
   } catch (error) {
