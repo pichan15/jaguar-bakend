@@ -585,7 +585,121 @@ app.get('/api/admin/inscritos', async (req, res) => {
   }
 });
 
+// Obtener estadísticas financieras detalladas
+app.get('/api/admin/estadisticas-financieras', async (req, res) => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=obtener_estadisticas_financieras&token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Error al obtener estadísticas');
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Error al obtener estadísticas financieras:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Error al obtener estadísticas' 
+    });
+  }
+});
+
 // ==================== FIN ENDPOINTS ADMINISTRACIÓN ====================
+
+// Endpoint: Desactivar usuario (soft delete - marca como inactivo)
+app.post('/api/desactivar-usuario', async (req, res) => {
+  try {
+    const { dni } = req.body;
+    
+    if (!dni || dni.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'DNI inválido'
+      });
+    }
+    
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'desactivar_usuario',
+        token: APPS_SCRIPT_TOKEN,
+        dni: dni
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Error al desactivar usuario');
+    }
+    
+    // INVALIDAR CACHÉ después de desactivar usuario
+    invalidateDNICache(dni);
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(inscritosKeys);
+    console.log('🗑️ CACHÉ INVALIDADO tras desactivar usuario');
+    
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Error al desactivar usuario:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Error al desactivar usuario' 
+    });
+  }
+});
+
+// Endpoint: Reactivar usuario (marca como activo)
+app.post('/api/reactivar-usuario', async (req, res) => {
+  try {
+    const { dni } = req.body;
+    
+    if (!dni || dni.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'DNI inválido'
+      });
+    }
+    
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'reactivar_usuario',
+        token: APPS_SCRIPT_TOKEN,
+        dni: dni
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Error al reactivar usuario');
+    }
+    
+    // INVALIDAR CACHÉ después de reactivar usuario
+    invalidateDNICache(dni);
+    const inscritosKeys = cache.keys().filter(k => k.startsWith('inscritos_'));
+    cache.del(inscritosKeys);
+    console.log('🗑️ CACHÉ INVALIDADO tras reactivar usuario');
+    
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Error al reactivar usuario:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Error al reactivar usuario' 
+    });
+  }
+});
 
 // Endpoint: Activar inscripciones manualmente (cuando el admin confirma pago)
 app.post('/api/activar-inscripciones/:dni', async (req, res) => {
