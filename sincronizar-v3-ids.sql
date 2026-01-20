@@ -1,7 +1,6 @@
--- Sincronización V3: IDs Exactos del Entorno Local
+-- Sincronización V3.1: IDs Exactos con Columna Correcta (categoria_id)
 -- Fuente: Datos proporcionados por el usuario
 -- IDs de Deportes: 1:Fútbol, 2:Fem, 3:Vóley, 4:Básquet, 5:MAMAS, 6:ASODE, 7:Funcional, 8:GYM
--- Orden de columnas: id, deporte_id, nombre, descripcion, ano_min, ano_max, orden, estado
 
 SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
@@ -9,7 +8,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE categorias;
 SET FOREIGN_KEY_CHECKS = 1;
 
-INSERT INTO categorias (id, deporte_id, nombre, descripcion, ano_min, ano_max, orden, estado) VALUES
+INSERT INTO categorias (categoria_id, deporte_id, nombre, descripcion, ano_min, ano_max, orden, estado) VALUES
 -- ASODE (6)
 (44, 6, '2009-2010', 'Categoría 2009-2010 - ASODE', 2009, 2010, 2009, 'Activo'),
 (45, 6, '2011-2012', 'Categoría 2011-2012 - ASODE', 2011, 2012, 2011, 'Activo'),
