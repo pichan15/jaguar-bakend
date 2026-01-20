@@ -419,8 +419,9 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
             `INSERT INTO alumnos (
               dni, nombres, apellido_paterno, apellido_materno, 
               fecha_nacimiento, sexo, telefono, email, direccion,
-              seguro_tipo, condicion_medica, apoderado, telefono_apoderado
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              seguro_tipo, condicion_medica, apoderado, telefono_apoderado,
+              created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               alumno.dni,
               alumno.nombres,
@@ -434,7 +435,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
               alumno.seguro_tipo || null,
               alumno.condicion_medica || null,
               alumno.apoderado || null,
-              alumno.telefono_apoderado || null
+              alumno.telefono_apoderado || null,
+              new Date() // created_at
             ]
           );
           alumnoId = insertResult.insertId;
@@ -551,8 +553,8 @@ app.post('/api/inscribir-multiple', rateLimiterInscripciones, async (req, res) =
           }
 
           const [result] = await db.query(
-            `INSERT INTO inscripciones (codigo_operacion, alumno_id, deporte_id, plan, precio_mensual, matricula_pagada, estado)
-             VALUES (?, ?, ?, ?, ?, 0, 'pendiente')`,
+            `INSERT INTO inscripciones (codigo_operacion, alumno_id, deporte_id, plan, precio_mensual, matricula_pagada, estado, fecha_inscripcion)
+             VALUES (?, ?, ?, ?, ?, 0, 'pendiente', NOW())`,
             [codigoOperacion, alumnoId, deporteId, plan, precioMensual]
           );
 
