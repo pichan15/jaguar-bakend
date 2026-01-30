@@ -4,6 +4,8 @@ import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Trigger redeploy - CORS updated for production
 import { config } from 'dotenv';
 import NodeCache from 'node-cache';
 import mysql from 'mysql2/promise';
