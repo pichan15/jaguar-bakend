@@ -2141,6 +2141,456 @@ app.get('/api/admin/estadisticas-financieras', verificarAutenticacion, verificar
 
 // ==================== FIN ENDPOINTS ADMINISTRACIÓN ====================
 
+// ==================== ENDPOINTS PROFESORES ====================
+
+/**
+ * Obtener deportes asignados al profesor
+ */
+app.get('/api/profesor/mis-deportes', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    // Obtener deportes asignados al profesor
+    const [deportes] = await db.query(`
+      SELECT DISTINCT d.deporte_id, d.nombre, d.icono
+      FROM profesor_deportes pd
+      INNER JOIN deportes d ON pd.deporte_id = d.deporte_id
+      WHERE pd.admin_id = ? AND d.estado = 'activo'
+      ORDER BY d.nombre
+    `, [adminId]);
+    
+    res.json({
+      success: true,
+      deportes: deportes
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener deportes del profesor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener deportes asignados'
+    });
+  }
+});
+
+/**
+ * Obtener clases del profesor para un día específico
+ */
+app.get('/api/profesor/mis-clases', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { dia } = req.query;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    if (!dia) {
+      return res.status(400).json({
+        success: false,
+        error: 'Día requerido'
+      });
+    }
+    
+    // Obtener horarios del profesor para el día especificado
+    const [horarios] = await db.query(`
+      SELECT 
+        h.horario_id,
+        d.nombre as deporte,
+        h.categoria,
+        h.dia,
+        h.hora_inicio,
+        h.hora_fin,
+        COUNT(DISTINCT ih.inscripcion_id) as total_alumnos
+      FROM profesor_deportes pd
+      INNER JOIN horarios h ON pd.deporte_id = h.deporte_id 
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      INNER JOIN deportes d ON h.deporte_id = d.deporte_id
+      LEFT JOIN inscripcion_horarios ih ON h.horario_id = ih.horario_id
+      WHERE pd.admin_id = ? 
+        AND h.dia = ?
+        AND h.estado = 'activo'
+      GROUP BY h.horario_id, d.nombre, h.categoria, h.dia, h.hora_inicio, h.hora_fin
+      ORDER BY h.hora_inicio
+    `, [adminId, dia]);
+    
+    res.json({
+      success: true,
+      clases: horarios
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener clases del profesor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener clases'
+    });
+  }
+});
+
+/**
+ * Obtener categorías de un deporte asignado al profesor
+ */
+app.get('/api/profesor/categorias-deporte/:deporteId', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { deporteId } = req.params;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    // Obtener categorías únicas del deporte
+    const [categorias] = await db.query(`
+      SELECT DISTINCT h.categoria
+      FROM profesor_deportes pd
+      INNER JOIN horarios h ON pd.deporte_id = h.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+      WHERE pd.admin_id = ? 
+        AND pd.deporte_id = ?
+        AND h.estado = 'activo'
+        AND h.categoria IS NOT NULL
+      ORDER BY h.categoria
+    `, [adminId, deporteId]);
+    
+    res.json({
+      success: true,
+      categorias: categorias
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener categorías:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener categorías'
+    });
+  }
+});
+
+/**
+ * Obtener horarios de una categoría específica
+ */
+app.get('/api/profesor/horarios-categoria', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { deporte_id, categoria, dia } = req.query;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    if (!deporte_id || !categoria || !dia) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parámetros incompletos'
+      });
+    }
+    
+    const [horarios] = await db.query(`
+      SELECT 
+        h.horario_id,
+        h.hora_inicio,
+        h.hora_fin,
+        h.dia
+      FROM profesor_deportes pd
+      INNER JOIN horarios h ON pd.deporte_id = h.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE pd.admin_id = ?
+        AND h.deporte_id = ?
+        AND h.categoria = ?
+        AND h.dia = ?
+        AND h.estado = 'activo'
+      ORDER BY h.hora_inicio
+    `, [adminId, deporte_id, categoria, dia]);
+    
+    res.json({
+      success: true,
+      horarios: horarios
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener horarios:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener horarios'
+    });
+  }
+});
+
+/**
+ * Obtener alumnos de una clase específica
+ */
+app.get('/api/profesor/alumnos-clase/:horarioId', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { horarioId } = req.params;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    // Verificar que el profesor tenga acceso a este horario
+    const [acceso] = await db.query(`
+      SELECT h.horario_id
+      FROM horarios h
+      INNER JOIN profesor_deportes pd ON h.deporte_id = pd.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE h.horario_id = ? AND pd.admin_id = ?
+    `, [horarioId, adminId]);
+    
+    if (acceso.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: 'No tienes acceso a esta clase'
+      });
+    }
+    
+    // Obtener info del horario
+    const [horario] = await db.query(`
+      SELECT 
+        h.horario_id,
+        d.nombre as deporte,
+        h.categoria,
+        h.dia,
+        h.hora_inicio,
+        h.hora_fin
+      FROM horarios h
+      INNER JOIN deportes d ON h.deporte_id = d.deporte_id
+      WHERE h.horario_id = ?
+    `, [horarioId]);
+    
+    // Obtener alumnos inscritos en este horario
+    const fechaHoy = new Date().toISOString().split('T')[0];
+    
+    const [alumnos] = await db.query(`
+      SELECT 
+        a.alumno_id,
+        a.dni,
+        CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', a.apellido_materno) as nombre_completo,
+        asist.asistencia_id,
+        asist.presente,
+        CASE WHEN asist.asistencia_id IS NOT NULL THEN TRUE ELSE FALSE END as asistencia_registrada
+      FROM inscripcion_horarios ih
+      INNER JOIN inscripciones i ON ih.inscripcion_id = i.inscripcion_id
+      INNER JOIN alumnos a ON i.alumno_id = a.alumno_id
+      LEFT JOIN asistencias asist ON asist.alumno_id = a.alumno_id 
+        AND asist.horario_id = ih.horario_id 
+        AND asist.fecha = ?
+      WHERE ih.horario_id = ?
+        AND i.estado = 'activa'
+        AND a.estado = 'activo'
+      ORDER BY a.apellido_paterno, a.apellido_materno, a.nombres
+    `, [fechaHoy, horarioId]);
+    
+    res.json({
+      success: true,
+      horario: horario[0],
+      alumnos: alumnos
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener alumnos de la clase:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener alumnos'
+    });
+  }
+});
+
+/**
+ * Guardar asistencia de una clase
+ */
+app.post('/api/profesor/guardar-asistencia', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { horario_id, fecha, asistencias } = req.body;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    if (!horario_id || !fecha || !asistencias || !Array.isArray(asistencias)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Datos incompletos'
+      });
+    }
+    
+    // Verificar acceso del profesor al horario
+    const [acceso] = await db.query(`
+      SELECT h.horario_id
+      FROM horarios h
+      INNER JOIN profesor_deportes pd ON h.deporte_id = pd.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE h.horario_id = ? AND pd.admin_id = ?
+    `, [horario_id, adminId]);
+    
+    if (acceso.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: 'No tienes acceso a esta clase'
+      });
+    }
+    
+    // Registrar asistencias (INSERT ON DUPLICATE KEY UPDATE)
+    for (const asist of asistencias) {
+      await db.query(`
+        INSERT INTO asistencias (alumno_id, horario_id, fecha, presente, registrado_por)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE 
+          presente = VALUES(presente),
+          registrado_por = VALUES(registrado_por)
+      `, [asist.alumno_id, horario_id, fecha, asist.presente, adminId]);
+    }
+    
+    console.log(`✅ Asistencia guardada por profesor ID ${adminId} - Horario ${horario_id} - ${asistencias.length} alumnos`);
+    
+    res.json({
+      success: true,
+      message: 'Asistencia guardada correctamente',
+      total_registros: asistencias.length
+    });
+    
+  } catch (error) {
+    console.error('Error al guardar asistencia:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al guardar asistencia'
+    });
+  }
+});
+
+/**
+ * Obtener reporte de asistencias del profesor
+ */
+app.get('/api/profesor/reporte-asistencias', verificarAutenticacion, async (req, res) => {
+  try {
+    const adminId = req.admin.admin_id;
+    const { fecha_inicio, fecha_fin, deporte_id } = req.query;
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Base de datos no disponible'
+      });
+    }
+    
+    if (!fecha_inicio || !fecha_fin) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fechas requeridas'
+      });
+    }
+    
+    // Construir filtros
+    let filtroDeporte = '';
+    let params = [adminId, fecha_inicio, fecha_fin];
+    
+    if (deporte_id) {
+      filtroDeporte = 'AND h.deporte_id = ?';
+      params.push(deporte_id);
+    }
+    
+    // Estadísticas generales
+    const [stats] = await db.query(`
+      SELECT 
+        SUM(CASE WHEN asist.presente = 1 THEN 1 ELSE 0 END) as total_presentes,
+        SUM(CASE WHEN asist.presente = 0 THEN 1 ELSE 0 END) as total_ausentes
+      FROM asistencias asist
+      INNER JOIN horarios h ON asist.horario_id = h.horario_id
+      INNER JOIN profesor_deportes pd ON h.deporte_id = pd.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE pd.admin_id = ?
+        AND asist.fecha BETWEEN ? AND ?
+        ${filtroDeporte}
+    `, params);
+    
+    // Asistencias por fecha (para gráfico)
+    const [porFecha] = await db.query(`
+      SELECT 
+        asist.fecha,
+        SUM(CASE WHEN asist.presente = 1 THEN 1 ELSE 0 END) as presentes,
+        SUM(CASE WHEN asist.presente = 0 THEN 1 ELSE 0 END) as ausentes
+      FROM asistencias asist
+      INNER JOIN horarios h ON asist.horario_id = h.horario_id
+      INNER JOIN profesor_deportes pd ON h.deporte_id = pd.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE pd.admin_id = ?
+        AND asist.fecha BETWEEN ? AND ?
+        ${filtroDeporte}
+      GROUP BY asist.fecha
+      ORDER BY asist.fecha
+    `, params);
+    
+    // Detalle por alumno
+    const [porAlumno] = await db.query(`
+      SELECT 
+        a.alumno_id,
+        CONCAT(a.nombres, ' ', a.apellido_paterno, ' ', a.apellido_materno) as nombre_completo,
+        SUM(CASE WHEN asist.presente = 1 THEN 1 ELSE 0 END) as total_presentes,
+        SUM(CASE WHEN asist.presente = 0 THEN 1 ELSE 0 END) as total_ausentes
+      FROM asistencias asist
+      INNER JOIN alumnos a ON asist.alumno_id = a.alumno_id
+      INNER JOIN horarios h ON asist.horario_id = h.horario_id
+      INNER JOIN profesor_deportes pd ON h.deporte_id = pd.deporte_id
+        AND (pd.categoria IS NULL OR pd.categoria = h.categoria)
+        AND (pd.dia IS NULL OR pd.dia = h.dia)
+      WHERE pd.admin_id = ?
+        AND asist.fecha BETWEEN ? AND ?
+        ${filtroDeporte}
+      GROUP BY a.alumno_id, a.nombres, a.apellido_paterno, a.apellido_materno
+      ORDER BY a.apellido_paterno, a.apellido_materno
+    `, params);
+    
+    res.json({
+      success: true,
+      estadisticas: {
+        total_presentes: stats[0]?.total_presentes || 0,
+        total_ausentes: stats[0]?.total_ausentes || 0,
+        por_fecha: porFecha,
+        por_alumno: porAlumno
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error al generar reporte:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al generar reporte'
+    });
+  }
+});
+
+// ==================== FIN ENDPOINTS PROFESORES ====================
+
 // Endpoint: Desactivar usuario (soft delete - marca como inactivo)
 app.post('/api/desactivar-usuario', async (req, res) => {
   try {
