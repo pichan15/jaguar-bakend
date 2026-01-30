@@ -28,8 +28,10 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cargar variables de entorno desd .env
+// Cargar variables de entorno desde .env
 config({ path: path.join(__dirname, '.env') });
+
+// Version de deploy: v1.2.3 - CORS y redeploy trigger
 
 // ==================== CONFIGURACIÓN MYSQL ====================
 
