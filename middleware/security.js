@@ -108,9 +108,9 @@ export const corsOptions = {
             'http://127.0.0.1:5501',
             'http://127.0.0.1:5502',
             'http://127.0.0.1:8080',
-            // Agregar dominio de producción aquí
-            // 'https://tudominio.com',
-            // 'https://www.tudominio.com'
+            // Dominios de producción
+            'https://escuelajaguares.netlify.app',
+            'https://www.escuelajaguares.netlify.app'
         ];
 
         // Permitir requests sin origin (como Postman, curl, apps móviles)
