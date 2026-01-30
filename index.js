@@ -67,7 +67,7 @@ async function initDatabase() {
 initDatabase();
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3002; // Updated: Force redeploy
 
 // ==================== CONFIGURACIÓN ACADEMIA DEPORTIVA ====================
 
